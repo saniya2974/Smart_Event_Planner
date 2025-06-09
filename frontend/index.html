@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Smart Event Planner</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #eef; padding: 20px; }
+    input, button { margin: 5px 0; padding: 10px; width: 100%; max-width: 400px; }
+    label { display: block; margin-top: 10px; }
+    .event { background: white; padding: 15px; border-radius: 8px; margin-top: 10px; box-shadow: 0 0 5px #ccc; max-width: 500px; }
+    .container { max-width: 600px; margin: auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📅 Smart Event Planner</h1>
+
+    <label>Event Name:</label>
+    <input id="name" placeholder="e.g., Cricket Match" />
+
+    <label>Location (City):</label>
+    <input id="location" placeholder="e.g., Mumbai" />
+
+    <label>Date:</label>
+    <input id="date" type="date" />
+
+    <label>Event Type (cricket/wedding):</label>
+    <input id="type" placeholder="e.g., cricket" />
+
+    <button onclick="addEvent()">➕ Create Event</button>
+    <button onclick="loadEvents()">🔁 Load Events</button>
+
+    <div id="events"></div>
+  </div>
+
+  <script>
+    const backend = "http://127.0.0.1:5000";
+
+    async function addEvent() {
+      const data = {
+        name: document.getElementById("name").value,
+        location: document.getElementById("location").value,
+        date: document.getElementById("date").value,
+        type: document.getElementById("type").value.toLowerCase()
+      };
+
+      if (!data.name || !data.location || !data.date || !data.type) {
+        alert("Please fill all fields.");
+        return;
+      }
+
+      await fetch(`${backend}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+
+      alert("🎉 Event Created!");
+      loadEvents();
+    }
+
+    async function loadEvents() {
+  const res = await fetch(`${backend}/events`);
+  const events = await res.json();
+  const container = document.getElementById("events");
+  container.innerHTML = "";
+
+  for (const ev of events) {
+    let weatherHTML = "";
+    if (Array.isArray(ev.weather)) {
+      weatherHTML = `<b>5-Day Forecast:</b><br>` + ev.weather.map(day => `
+        📅 ${day.date} - 🌡️ ${day.temp}°C, 💧 ${day.precip}mm, 🍃 ${day.wind}km/h
+        ➤ Score: ${day.score} (${day.suitability})<br>
+      `).join("");
+    } else {
+      weatherHTML = `<button onclick="checkWeather('${ev._id}')">Check Weather</button>`;
+    }
+
+    const div = document.createElement("div");
+    div.className = "event";
+    div.innerHTML = `
+      <b>${ev.name}</b> <br>
+      📍 ${ev.location} <br>
+      📅 ${ev.date} <br>
+      🎈 ${ev.type} <br><br>
+      ${ev.suggestion && ev.suggestion.message ? `<b>🗓️ Suggestion:</b> ${ev.suggestion.message}<br><br>` : ""}
+
+
+      ${weatherHTML}
+    `;
+
+    container.appendChild(div);
+  }
+}
+
+    async function checkWeather(id) {
+      await fetch(`${backend}/events/${id}/weather-check`, {
+        method: "POST"
+      });
+      loadEvents();
+    }
+
+    window.onload = loadEvents;
+  </script>
+</body>
+</html>

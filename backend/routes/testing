@@ -1,0 +1,80 @@
+from flask import Blueprint, request, jsonify
+from bson.objectid import ObjectId
+from config import events_collection
+from services.weather_service import get_weather_forecast, calculate_score
+from models.event_model import validate_event
+from datetime import datetime
+from collections import defaultdict
+
+event_routes = Blueprint("event_routes", __name__)
+
+# Create event
+@event_routes.route("/events", methods=["POST"])
+def create_event():
+    data = request.get_json()
+    valid, msg = validate_event(data)
+    if not valid:
+        return jsonify({"error": msg}), 400
+
+    result = events_collection.insert_one(data)
+    return jsonify({"message": "Event created", "id": str(result.inserted_id)})
+
+# List all events
+@event_routes.route("/events", methods=["GET"])
+def list_events():
+    events = list(events_collection.find())
+    for event in events:
+        event["_id"] = str(event["_id"])
+    return jsonify(events)
+
+# Analyze weather and give 5-day forecast with scores
+@event_routes.route("/events/<id>/weather-check", methods=["POST"])
+def weather_check(id):
+    event = events_collection.find_one({"_id": ObjectId(id)})
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    city = event["location"]
+    event_type = event["type"]
+    forecast_data = get_weather_forecast(city)
+
+    if "list" not in forecast_data:
+        return jsonify({"error": "Forecast data unavailable"}), 500
+
+    daily_forecast = defaultdict(list)
+
+    for entry in forecast_data["list"]:
+        dt = datetime.strptime(entry["dt_txt"], "%Y-%m-%d %H:%M:%S")
+        day = dt.date()
+        daily_forecast[day].append(entry)
+
+    five_day_summary = []
+    for day, entries in list(daily_forecast.items())[:5]:  # only first 5 days
+        temps = [e["main"]["temp"] for e in entries]
+        winds = [e["wind"]["speed"] for e in entries]
+        precs = [e.get("rain", {}).get("3h", 0) for e in entries]
+
+        avg_temp = sum(temps) / len(temps)
+        avg_wind = sum(winds) / len(winds)
+        avg_prec = sum(precs) / len(precs)
+
+        score = calculate_score(avg_temp, avg_prec, avg_wind, event_type)
+        label = "Good" if score >= 90 else "Okay" if score >= 60 else "Poor"
+
+        five_day_summary.append({
+            "date": str(day),
+            "temp": round(avg_temp, 1),
+            "wind": round(avg_wind, 1),
+            "precip": round(avg_prec, 1),
+            "score": score,
+            "suitability": label
+        })
+
+    events_collection.update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {
+            "weather": five_day_summary
+        }}
+    )
+
+    return jsonify({"forecast": five_day_summary})
